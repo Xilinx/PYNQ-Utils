@@ -10,5 +10,5 @@ from .bdc_meta import (
     BdcRegister,
     BdcRegMap,
 )
-from .boardstore import Boards, BoardStore
+from .boardstore import Board, Boards, BoardStore
 from .xsa_parser import XsaParser

@@ -9,7 +9,11 @@ from distutils.file_util import copy_file
 
 from setuptools.command.build_py import build_py as _build_py
 
-from ..runtime.detect_devices import detect_devices
+try: 
+    from pynq.utils import detect_devices
+except:
+    from ..runtime.detect_devices import detect_devices
+
 from ..runtime.logging import get_logger
 from .deliver_notebooks import (
     OverlayNotFoundError,
