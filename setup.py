@@ -33,9 +33,12 @@ def extend_pynq_utils_package(data_list):
 # Get the version
 ver_file = open("./pynqutils/version.txt", "r")
 ver_str = ver_file.readline()
-with open("README.md", encoding="utf-8") as fh:
-    readme_lines = fh.readlines()[:]
-long_description = "".join(readme_lines)
+
+# read the contents of your README file
+from pathlib import Path
+this_directory = Path(__file__).parent
+long_description = (this_directory / "README.md").read_text()
+
 
 # Get the files
 pynq_utils_files = []
@@ -55,7 +58,9 @@ setup(
     name="pynqutils",
     version=ver_str,
     description="Utilities for PYNQ",
-    url="",
+    long_description=long_description,
+    long_description_content_type='text/markdown',
+    url="https://github.com/Xilinx/PYNQ-Utils",
     author="pynq",
     author_email="pynq_support@xilinx.com",
     packages=find_packages(),
