@@ -10,7 +10,7 @@ PYNQ-Utils is a repository containing utilities used in various other repos and 
 
 To install PYNQ-Utils use the following command:
 ```Bash
-python3 -m pip install git+https://github.com/Xilinx/PYNQ-Utils
+python3 -m pip install pynqutils 
 ```
 
 ## setup.py example
