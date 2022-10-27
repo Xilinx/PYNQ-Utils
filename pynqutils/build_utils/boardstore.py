@@ -106,10 +106,10 @@ class BoardStore:
     Board objects from selected vendors and board families.
 
     families: ZynqUltraScale, ZynqRFSoC, Zynq7000, Versal, KriaSOM
-    vendors: Avnet, Digilent, iWave, OpalKelly, Trenz_Electronic, TUL
+    vendors: Xilinx, Avnet, Digilent, iWave, OpalKelly, Trenz_Electronic, TUL
     branch: 2022.1, 2021.2, 2021.1, 2020.2, etc.
     '''
-    def __init__(self, repo_path, families=None, vendors=None, branch=2022.1):
+    def __init__(self, repo_path, families=None, vendors="All", branch="master"):
         self.repo_path = repo_path
         
         if not os.path.exists(repo_path):
@@ -123,7 +123,7 @@ class BoardStore:
     def get_repo(self):
         return self.repo_path
     
-    def populate_boards(self, families=None, vendors=None):
+    def populate_boards(self, families=None, vendors="All"):
         '''
         This function sets the boards list, we can filter the boards by family
         and by vendor.
@@ -136,7 +136,7 @@ class BoardStore:
         all_vendors = os.listdir(os.path.join(self.repo_path,'boards'))
         
         # If vendors is not set, then boards from all vendors will be returned
-        if vendors == None:
+        if vendors == "All":
             vendors = all_vendors
         
         # For each board in each vendor folder, pass the board dir into the Board
