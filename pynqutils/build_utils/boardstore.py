@@ -5,7 +5,50 @@ import os
 import xml
 import xml.etree.ElementTree as ET
 from typing import Union
-from tqdm.notebook import tqdm
+from tqdm.notebook import trange, tqdm
+import json
+
+def _default_repr(obj):
+    return repr(obj)
+
+
+class ReprDict(dict):
+    """Subclass of the built-in dict that will display using the JupyterLab
+    JSON repr.
+
+    The class is recursive in that any entries that are also dictionaries
+    will be converted to ReprDict objects when returned.
+
+    """
+
+    def __init__(self, *args, rootname="root", expanded=False, **kwargs):
+        """Dictionary constructor
+
+        Parameters
+        ----------
+        rootname : str
+            The value to display at the root of the tree
+        expanded : bool
+            Whether the view of the tree should start expanded
+
+        """
+        self._rootname = rootname
+        self._expanded = expanded
+
+        super().__init__(*args, **kwargs)
+
+    def _repr_json_(self):
+        return json.loads(json.dumps(self, default=_default_repr)), {
+            "expanded": self._expanded,
+            "root": self._rootname,
+        }
+
+    def __getitem__(self, key):
+        obj = super().__getitem__(key)
+        if type(obj) is dict:
+            return ReprDict(obj, expanded=self._expanded, rootname=key)
+        else:
+            return obj
 
 def find_xml(name, path)->list:
     '''
@@ -60,38 +103,70 @@ def resolve_version(version_dict)->Union[str,list]:
 class BoardStore:
     '''
     This class parses the XilinxBoardStore repository and returns a list of 
-    Board objects from selected manufacturers and board families
+    Board objects from selected vendors and board families.
+
+    families: ZynqUltraScale, ZynqRFSoC, Zynq7000, Versal, KriaSOM
+    vendors: Avnet, Digilent, iWave, OpalKelly, Trenz_Electronic, TUL
+    branch: 2022.1, 2021.2, 2021.1, 2020.2, etc.
     '''
-    def __init__(self, repo_path, families=None, manufacturers=['Avnet', 'Digilent', 'TUL', 'Xilinx']):
+    def __init__(self, repo_path, families=None, vendors=None, branch=2022.1):
         self.repo_path = repo_path
         
         if not os.path.exists(repo_path):
-            os.system(f'git clone https://github.com/Xilinx/XilinxBoardStore {repo_path}')
+            os.system(f'git clone https://github.com/Xilinx/XilinxBoardStore -b {branch} {repo_path}')
         
         self.boards = []
-        self.populate_boards(families, manufacturers)
+        self.populate_boards(families, vendors)
 
         self._curr_idx = 0
         
     def get_repo(self):
         return self.repo_path
     
-    def populate_boards(self, families=None, manufacturers=['Avnet', 'Digilent', 'TUL', 'Xilinx']):
-        for manufacturer in os.listdir(os.path.join(self.repo_path,'boards')):
-            # print(f"-----------{manufacturer}-----------")
-            if manufacturer in manufacturers:
-                for board in os.listdir(os.path.join(self.repo_path,'boards',manufacturer)):
-                    board_holder = Board(os.path.join(self.repo_path,'boards',manufacturer,board))
-                    board_family = board_holder.find_family()
-                    if families == None:
-                        if board_holder.part_name is not None:
-                            self.boards.append(board_holder)
-                    elif board_family in families:
-                        if board_holder.part_name is not None:
-                            self.boards.append(board_holder)
-                    else:
-                        pass
+    def populate_boards(self, families=None, vendors=None):
+        '''
+        This function sets the boards list, we can filter the boards by family
+        and by vendor.
+
+        families: ZynqUltraScale, ZynqRFSoC, Zynq7000, Versal, KriaSOM
+        vendors: Avnet, Digilent, iWave, OpalKelly, Trenz_Electronic, TUL
+        '''
+        # We get list of all possible vendors by listing the boards directory
+        # of the XilinxBoardStore repo
+        all_vendors = os.listdir(os.path.join(self.repo_path,'boards'))
+        
+        # If vendors is not set, then boards from all vendors will be returned
+        if vendors == None:
+            vendors = all_vendors
+        
+        # For each board in each vendor folder, pass the board dir into the Board
+        # constructor. If families not set, every board in the vendor folder will
+        # be included
+        for vendor in vendors:
+            for board in os.listdir(os.path.join(self.repo_path, 'boards', vendor)):
+                board_holder = Board(os.path.join(self.repo_path, 'boards', vendor, board))
+                board_family = board_holder.find_family()
+                if families == None:
+                    if board_holder.part_name is not None:
+                        self.boards.append(board_holder)
+                elif board_family in families:
+                    if board_holder.part_name is not None:
+                        self.boards.append(board_holder)
+                else:
+                    pass
                     
+    def _repr_json_(self):
+        r = {}
+        for b in self.boards:
+            r[b.name] = {}
+            r[b.name]['part'] = b.part_name
+            r[b.name]['file_version'] = b.file_version
+            r[b.name]['xml'] = b.board_xml_path
+            r[b.name]['version'] = b.current_version
+        return json.loads(json.dumps(r, default=_default_repr)), {
+            "root": "boards",
+        }
+
     def __iter__(self):
         self._curr_idx = 0
         if len(self.boards)>0:
@@ -201,6 +276,9 @@ class Board:
         'xczu47dr',
         'xczu48dr',
         'xczu49dr',
+        'xczu57dr',
+        'xczu58dr',
+        'xczu59dr',
         'xczu65dr',
         'xczu67dr',
         ]
@@ -214,5 +292,7 @@ class Board:
             return 'Zynq7000'
         elif any([any([subchild.attrib['name'] == 'versal_cips' for subchild in child]) for child in preset_root]):
             return 'Versal'
+        elif any([child.attrib['preset_proc_name'] == 'mpsoc_preset_vsom' for child in preset_root]):
+            return 'KriaSOM'
         else:
             return 'Unknown'
