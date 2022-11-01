@@ -18,6 +18,11 @@ from .deliver_notebooks import (
     _find_remote_overlay_res,
 )
 
+ZYNQ_ARCH = "armv7l"
+ZU_ARCH = "aarch64"
+CPU_ARCH = os.uname().machine
+CPU_ARCH_IS_SUPPORTED = CPU_ARCH in [ZYNQ_ARCH, ZU_ARCH]
+CPU_ARCH_IS_x86 = "x86" in CPU_ARCH
 
 def download_overlays(
     path: str,
@@ -120,11 +125,8 @@ def _resolve_devices_overlay_res(
     If the device is only one and is an edge device, file is resolved directly
     to ``overlay_res.ext``.
     """
-    from pynq.pl_server.device import Device
-    from pynq.pl_server.embedded_device import EmbeddedDevice
-
     overlay_res_filename = os.path.splitext(overlay_res_link)[0]
-    if len(devices) == 0 and type(Device.devices[0]) == EmbeddedDevice:
+    if len(devices) == 0 and not CPU_ARCH_IS_x86:
         overlay_res_fullpath = os.path.join(src_path, overlay_res_filename)
         _resolve_devices_overlay_res_helper(
             devices[0],
