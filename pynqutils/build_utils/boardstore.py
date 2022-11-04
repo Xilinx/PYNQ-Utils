@@ -115,7 +115,7 @@ class BoardStore:
         if not os.path.exists(repo_path):
             os.system(f'git clone https://github.com/Xilinx/XilinxBoardStore -b {branch} {repo_path}')
         
-        self.boards = []
+        self.boards = {} 
         self.populate_boards(families, vendors)
 
         self._curr_idx = 0
@@ -148,10 +148,10 @@ class BoardStore:
                 board_family = board_holder.find_family()
                 if families == None:
                     if board_holder.part_name is not None:
-                        self.boards.append(board_holder)
+                        self.boards[board_holder.name] = board_holder
                 elif board_family in families:
                     if board_holder.part_name is not None:
-                        self.boards.append(board_holder)
+                        self.boards[board_holder.name] = board_holder
                 else:
                     pass
                     
@@ -177,7 +177,7 @@ class BoardStore:
         if self._curr_idx >= len(self.boards):
             raise StopIteration
         else:
-            ret = self.boards[self._curr_idx]
+            ret = self.boards[list(self.boards.keys())[self._curr_idx]]
             self._progress_bar.update(1)
             self._curr_idx = self._curr_idx + 1
             return ret
