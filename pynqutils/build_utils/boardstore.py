@@ -7,6 +7,7 @@ import xml.etree.ElementTree as ET
 from typing import Union
 from tqdm.notebook import trange, tqdm
 import json
+import re
 
 def _default_repr(obj):
     return repr(obj)
@@ -108,28 +109,30 @@ class BoardStore:
     families: ZynqUltraScale, ZynqRFSoC, Zynq7000, Versal, KriaSOM
     vendors: Xilinx, Avnet, Digilent, iWave, OpalKelly, Trenz_Electronic, TUL
     branch: 2022.1, 2021.2, 2021.1, 2020.2, etc.
+    regex: A regex pattern that will filter based on the regex string on the name of the boards
     '''
-    def __init__(self, repo_path, families=None, vendors="All", branch="master"):
+    def __init__(self, repo_path, families=None, vendors="All", branch="master", regex=None):
         self.repo_path = repo_path
         
         if not os.path.exists(repo_path):
             os.system(f'git clone https://github.com/Xilinx/XilinxBoardStore -b {branch} {repo_path}')
         
-        self.boards = []
-        self.populate_boards(families, vendors)
+        self.boards = {} 
+        self.populate_boards(families, vendors, regex)
 
         self._curr_idx = 0
         
     def get_repo(self):
         return self.repo_path
-    
-    def populate_boards(self, families=None, vendors="All"):
+
+    def populate_boards(self, families=None, vendors="All", regex=None):
         '''
         This function sets the boards list, we can filter the boards by family
         and by vendor.
 
         families: ZynqUltraScale, ZynqRFSoC, Zynq7000, Versal, KriaSOM
         vendors: Avnet, Digilent, iWave, OpalKelly, Trenz_Electronic, TUL
+        regex: A regex pattern that will filter based on the regex string on the name of the boards
         '''
         # We get list of all possible vendors by listing the boards directory
         # of the XilinxBoardStore repo
@@ -148,10 +151,20 @@ class BoardStore:
                 board_family = board_holder.find_family()
                 if families == None:
                     if board_holder.part_name is not None:
-                        self.boards.append(board_holder)
+                        if regex is not None:
+                            pattern = re.compile(regex)
+                            if pattern.search(board_holder.name):
+                                self.boards[board_holder.name] = board_holder
+                        else:
+                            self.boards[board_holder.name] = board_holder
                 elif board_family in families:
                     if board_holder.part_name is not None:
-                        self.boards.append(board_holder)
+                        if regex is not None:
+                            pattern = re.compile(regex)
+                            if pattern.search(board_holder.name):
+                                self.boards[board_holder.name] = board_holder
+                        else:
+                            self.boards[board_holder.name] = board_holder
                 else:
                     pass
                     
@@ -177,7 +190,7 @@ class BoardStore:
         if self._curr_idx >= len(self.boards):
             raise StopIteration
         else:
-            ret = self.boards[self._curr_idx]
+            ret = self.boards[list(self.boards.keys())[self._curr_idx]]
             self._progress_bar.update(1)
             self._curr_idx = self._curr_idx + 1
             return ret
