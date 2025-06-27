@@ -16,7 +16,6 @@ from typing import Dict, Union
 from xml.dom.minidom import Element
 from xml.etree import ElementTree
 
-import pkg_resources
 
 
 class XsaParsingCannotFindBlockDesignName(Exception):
