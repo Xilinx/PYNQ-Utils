@@ -51,7 +51,7 @@ extend_pynq_utils_package(
 )
 
 # Required packages
-required = ["setuptools>=24.2.0", "pynqmetadata>=0.0.1", "cffi", "tqdm", "numpy<2.0", "python-magic>=0.4.25"]
+required = ["setuptools<=80", "pynqmetadata>=0.0.1", "cffi", "tqdm", "numpy<2.0", "python-magic>=0.4.25"]
 
 
 setup(
