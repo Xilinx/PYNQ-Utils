@@ -53,6 +53,11 @@ extend_pynq_utils_package(
 # Required packages
 required = ["setuptools<=80", "pynqmetadata>=0.0.1", "cffi", "tqdm", "numpy<2.0", "python-magic>=0.4.25"]
 
+# Platform-specific dependencies for Windows
+import sys
+if sys.platform.startswith('win'):
+    required.append("python-magic-bin>=0.4.14")
+
 
 setup(
     name="pynqutils",
