@@ -38,8 +38,11 @@ def resolve_paths(board_dir)->dict:
     Returns a dict of absolute paths to all board.xml files
     in a board folder, indexed by version numbers
     '''
-    version_dict = {}
     board_xmls = find_xml('board.xml', board_dir)
+    if not board_xmls:
+        return {}
+    
+    version_dict = {}
     for xml in board_xmls:
         version_dict[os.path.normpath(xml).split(os.path.sep)[-2]] = xml
 
@@ -80,7 +83,8 @@ class BoardStore:
         for manufacturer in os.listdir(os.path.join(self.repo_path,'boards')):
             # print(f"-----------{manufacturer}-----------")
             if manufacturer in manufacturers:
-                for board in os.listdir(os.path.join(self.repo_path,'boards',manufacturer)):
+                board_dir_path = os.path.join(self.repo_path, 'boards', manufacturer)
+                for board in [b for b in os.listdir(board_dir_path) if os.path.isdir(os.path.join(board_dir_path, b))]:
                     board_holder = Board(os.path.join(self.repo_path,'boards',manufacturer,board))
                     board_family = board_holder.find_family()
                     if families == None:
@@ -210,6 +214,8 @@ class Board:
                 return 'ZynqRFSoC'
             else:
                 return 'ZynqUltraScale'
+        elif any(['mpsoc_preset' in child.attrib['preset_proc_name'] for child in preset_root]):
+            return 'ZynqUltraScale'
         elif any([child.attrib['preset_proc_name'] == 'ps7_preset' for child in preset_root]):
             return 'Zynq7000'
         elif any([any([subchild.attrib['name'] == 'versal_cips' for subchild in child]) for child in preset_root]):
