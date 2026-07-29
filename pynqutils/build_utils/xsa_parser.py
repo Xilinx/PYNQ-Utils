@@ -1,22 +1,13 @@
 # Copyright (C) 2022 Xilinx, Inc
 # SPDX-License-Identifier: BSD-3-Clause
 
-import atexit
 import json
-import logging
 import os
 import shutil
-import sys
 import tempfile
 import zipfile
-from distutils.command.build import build as dist_build
-from distutils.dir_util import copy_tree, mkpath, remove_tree
-from distutils.file_util import copy_file
-from typing import Dict, Union
-from xml.dom.minidom import Element
+from typing import Dict, Optional, Union
 from xml.etree import ElementTree
-
-import pkg_resources
 
 
 class XsaParsingCannotFindBlockDesignName(Exception):
@@ -125,12 +116,20 @@ class XsaParser(Xsa):
     @property
     def bitstreamPaths(self) -> tuple:
         """
-        return a tuple of paths to extracted bitstreams defined in sysdef.xml
-
+        Return a tuple of paths to extracted Zynq/ZU+ bitstreams (sysdef File Type=BIT).
         """
         if self.is_pre_synth():
             return None
         return self._Xsa__path([e.attrib["Name"] for e in self.__bitstreamElements()])
+
+    @property
+    def deviceImagePaths(self) -> tuple:
+        """
+        Return a tuple of paths to extracted Versal PDIs (sysdef File Type=PDI).
+        """
+        if self.is_pre_synth():
+            return None
+        return self._Xsa__path([e.attrib["Name"] for e in self.__deviceImageElements()])
 
     @property
     def defaultHwhPaths(self) -> tuple:
@@ -201,17 +200,36 @@ class XsaParser(Xsa):
         ]
         return self._Xsa__path(bdc_hwhs)
 
+    def _primaryProgrammableImagePath(self) -> Optional[str]:
+        """
+        Return the primary programmable device image path (BIT or PDI), or None.
+        """
+        if self.is_pre_synth():
+            return None
+        if self.bitstreamPaths:
+            return self.bitstreamPaths[0]
+        if self.deviceImagePaths:
+            return self.deviceImagePaths[0]
+        return None
+
     def createNameMatchingDefaultHwh(self) -> None:
         """
-        A temporary fix to rename the default bd to match the primary bitstream.
-        TODO: make it so that the whole XsaParser object is passed down into the
+        Copy the default BD HWH so its basename matches the primary programmable
+        device image (bitstream or PDI).
 
-        Assumes that we have only one bitfile, need to test this with PR projects.
+        PYNQ expects ``foo.hwh`` alongside ``foo.bit`` or ``foo.pdi`` when loading
+        an overlay.
+
+        Assumes a single primary image; uses the first BIT or PDI in sysdef order.
         """
         if self.is_pre_synth():
             return None
 
-        expected_hwh = os.path.splitext(self.bitstreamPaths[0])[0] + ".hwh"
+        primary = self._primaryProgrammableImagePath()
+        if primary is None:
+            return None
+
+        expected_hwh = os.path.splitext(primary)[0] + ".hwh"
         if expected_hwh not in self.defaultHwhPaths:
             shutil.copyfile(self.defaultHwhPaths[0], expected_hwh)
 
@@ -278,3 +296,13 @@ class XsaParser(Xsa):
         if self.is_pre_synth():
             return None
         return self._Xsa__sysdef.findall("File[@Type='BIT']")
+
+    def __deviceImageElements(self) -> list:
+        """
+        return a list of elements in sysdef representing Versal PDI device images
+
+        sysdef tag=File attributes Type=PDI
+        """
+        if self.is_pre_synth():
+            return None
+        return self._Xsa__sysdef.findall("File[@Type='PDI']")
