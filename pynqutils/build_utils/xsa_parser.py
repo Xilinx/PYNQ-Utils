@@ -1,4 +1,5 @@
 # Copyright (C) 2022 Xilinx, Inc
+# Copyright (C) 2022 - 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: BSD-3-Clause
 
 import json
@@ -30,14 +31,16 @@ class Xsa:
             """the set of members of the zip archive"""
             self.__members = set(xsa.namelist())
 
-        # I am assuming that sysdef.xml xsa.json, and xsa.xml are always members
+        # xsa.json and xsa.xml are always members; sysdef.xml is not.
         with open(self.__path("xsa.json")) as f:
             """xsa.json as a dict"""
             self.__json = json.load(f)
 
-        # TODO: this needs fixing for the platform stuff
-        # self.__presynth = self.__json["platformState"] == "pre_synth"
-        self.__presynth = False
+        # Vitis pre-synthesis XSAs carry no sysdef.xml, so the file lists it
+        # provides have to be recovered from the archive instead. The
+        # platformState field in xsa.json cannot be used to tell the two apart:
+        # it reads "pre_synth" even for fully implemented archives.
+        self.__presynth = "sysdef.xml" not in self.__members
 
         self.__sysdef = None
         if not self.__presynth:
@@ -48,15 +51,9 @@ class Xsa:
         self.__xml = ElementTree.parse(self.__path("xsa.xml")).getroot()
 
         if self.__presynth:
-            """get the hardware handoff from the project instead"""
-            bd_name = self._find_bd_name()
-            proj_name = self.__json["name"]
-            self.presynth_hwh = self.__path(
-                f"prj/{proj_name}.gen/sources_1/bd/{bd_name}/hw_handoff/{bd_name}.hwh"
-            )
-            self.presynth_vitis_tcl = self.__path(
-                f"prj/{proj_name}.gen/sources_1/bd/{bd_name}/hw_handoff/{bd_name}_bd.tcl"
-            )
+            """locate the hardware handoff in the archive itself"""
+            self.presynth_hwh = self.__find_default_hwh()
+            self.presynth_vitis_tcl = self.__find_vitis_tcl()
 
     def is_pre_synth(self) -> bool:
         """
@@ -64,18 +61,67 @@ class Xsa:
         """
         return self.__presynth
 
-    def _find_bd_name(self) -> str:
+    def _find_bd_name(self) -> Optional[str]:
         """
         From xsa.json examine the file list and attempt to
-        determine what the block design's name is
+        determine what the block design's name is. Returns None when the
+        archive does not name a top block design.
         """
-        for f in self.__json["files"]:
-            if f["type"] == "TOP_BD":
+        for f in self.__json.get("files", []):
+            if f.get("type") == "TOP_BD":
                 bd_filename = os.path.basename(f["name"])
                 return bd_filename.split(".")[0]
-        raise XsaParsingCannotFindBlockDesignName(
-            "Cannot find top block design name in XSA"
-        )
+        return None
+
+    def __root_handoffs(self) -> list:
+        """
+        Hardware handoff members at the top level of the archive
+        """
+        return sorted(n for n in self.__members if n.endswith(".hwh") and "/" not in n)
+
+    def __find_default_hwh(self) -> str:
+        """
+        Path to the top block design's handoff in an archive with no sysdef.xml
+
+        Vivado writes the handoffs to the archive root and prefixes each IP's
+        file with the name of the top block design, so the top level handoff is
+        the one whose name prefixes the most siblings. Where xsa.json names the
+        top block design that is used directly instead.
+        """
+        candidates = self.__root_handoffs()
+        if not candidates:
+            raise XsaParsingCannotFindBlockDesignName(
+                f"No hardware handoff found in {self.__archive}"
+            )
+
+        bd_name = self._find_bd_name()
+        if bd_name is not None and f"{bd_name}.hwh" in candidates:
+            return self.__path(f"{bd_name}.hwh")
+
+        stems = {name: name[: -len(".hwh")] for name in candidates}
+
+        def sibling_count(name: str) -> int:
+            return sum(
+                1
+                for other in candidates
+                if other != name and stems[other].startswith(stems[name] + "_")
+            )
+
+        top = max(candidates, key=lambda n: (sibling_count(n), -len(stems[n])))
+        return self.__path(top)
+
+    def __find_vitis_tcl(self) -> Optional[str]:
+        """
+        Path to the block design tcl, when the archive carries project sources
+        """
+        bd_name = self._find_bd_name()
+        if bd_name is None:
+            return None
+        wanted = f"{bd_name}_bd.tcl"
+        for member in self.__members:
+            if member.endswith(wanted):
+                return self.__path(member)
+        return None
 
     def __path(self, members: Union[str, list]) -> Union[str, tuple]:
         """
