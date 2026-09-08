@@ -305,4 +305,5 @@ class XsaParser(Xsa):
         """
         if self.is_pre_synth():
             return None
-        return self._Xsa__sysdef.findall("File[@Type='PDI']")
+        return (self._Xsa__sysdef.findall("File[@Type='PL_PDI']")
+                or self._Xsa__sysdef.findall("File[@Type='PDI']"))
