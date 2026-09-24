@@ -1,22 +1,14 @@
 # Copyright (C) 2022 Xilinx, Inc
+# Copyright (C) 2022 - 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: BSD-3-Clause
 
-import atexit
 import json
-import logging
 import os
 import shutil
-import sys
 import tempfile
 import zipfile
-from distutils.command.build import build as dist_build
-from distutils.dir_util import copy_tree, mkpath, remove_tree
-from distutils.file_util import copy_file
-from typing import Dict, Union
-from xml.dom.minidom import Element
+from typing import Dict, Optional, Union
 from xml.etree import ElementTree
-
-import pkg_resources
 
 
 class XsaParsingCannotFindBlockDesignName(Exception):
@@ -39,14 +31,16 @@ class Xsa:
             """the set of members of the zip archive"""
             self.__members = set(xsa.namelist())
 
-        # I am assuming that sysdef.xml xsa.json, and xsa.xml are always members
+        # xsa.json and xsa.xml are always members; sysdef.xml is not.
         with open(self.__path("xsa.json")) as f:
             """xsa.json as a dict"""
             self.__json = json.load(f)
 
-        # TODO: this needs fixing for the platform stuff
-        # self.__presynth = self.__json["platformState"] == "pre_synth"
-        self.__presynth = False
+        # Vitis pre-synthesis XSAs carry no sysdef.xml, so the file lists it
+        # provides have to be recovered from the archive instead. The
+        # platformState field in xsa.json cannot be used to tell the two apart:
+        # it reads "pre_synth" even for fully implemented archives.
+        self.__presynth = "sysdef.xml" not in self.__members
 
         self.__sysdef = None
         if not self.__presynth:
@@ -57,15 +51,9 @@ class Xsa:
         self.__xml = ElementTree.parse(self.__path("xsa.xml")).getroot()
 
         if self.__presynth:
-            """get the hardware handoff from the project instead"""
-            bd_name = self._find_bd_name()
-            proj_name = self.__json["name"]
-            self.presynth_hwh = self.__path(
-                f"prj/{proj_name}.gen/sources_1/bd/{bd_name}/hw_handoff/{bd_name}.hwh"
-            )
-            self.presynth_vitis_tcl = self.__path(
-                f"prj/{proj_name}.gen/sources_1/bd/{bd_name}/hw_handoff/{bd_name}_bd.tcl"
-            )
+            """locate the hardware handoff in the archive itself"""
+            self.presynth_hwh = self.__find_default_hwh()
+            self.presynth_vitis_tcl = self.__find_vitis_tcl()
 
     def is_pre_synth(self) -> bool:
         """
@@ -73,18 +61,67 @@ class Xsa:
         """
         return self.__presynth
 
-    def _find_bd_name(self) -> str:
+    def _find_bd_name(self) -> Optional[str]:
         """
         From xsa.json examine the file list and attempt to
-        determine what the block design's name is
+        determine what the block design's name is. Returns None when the
+        archive does not name a top block design.
         """
-        for f in self.__json["files"]:
-            if f["type"] == "TOP_BD":
+        for f in self.__json.get("files", []):
+            if f.get("type") == "TOP_BD":
                 bd_filename = os.path.basename(f["name"])
                 return bd_filename.split(".")[0]
-        raise XsaParsingCannotFindBlockDesignName(
-            "Cannot find top block design name in XSA"
-        )
+        return None
+
+    def __root_handoffs(self) -> list:
+        """
+        Hardware handoff members at the top level of the archive
+        """
+        return sorted(n for n in self.__members if n.endswith(".hwh") and "/" not in n)
+
+    def __find_default_hwh(self) -> str:
+        """
+        Path to the top block design's handoff in an archive with no sysdef.xml
+
+        Vivado writes the handoffs to the archive root and prefixes each IP's
+        file with the name of the top block design, so the top level handoff is
+        the one whose name prefixes the most siblings. Where xsa.json names the
+        top block design that is used directly instead.
+        """
+        candidates = self.__root_handoffs()
+        if not candidates:
+            raise XsaParsingCannotFindBlockDesignName(
+                f"No hardware handoff found in {self.__archive}"
+            )
+
+        bd_name = self._find_bd_name()
+        if bd_name is not None and f"{bd_name}.hwh" in candidates:
+            return self.__path(f"{bd_name}.hwh")
+
+        stems = {name: name[: -len(".hwh")] for name in candidates}
+
+        def sibling_count(name: str) -> int:
+            return sum(
+                1
+                for other in candidates
+                if other != name and stems[other].startswith(stems[name] + "_")
+            )
+
+        top = max(candidates, key=lambda n: (sibling_count(n), -len(stems[n])))
+        return self.__path(top)
+
+    def __find_vitis_tcl(self) -> Optional[str]:
+        """
+        Path to the block design tcl, when the archive carries project sources
+        """
+        bd_name = self._find_bd_name()
+        if bd_name is None:
+            return None
+        wanted = f"{bd_name}_bd.tcl"
+        for member in self.__members:
+            if member.endswith(wanted):
+                return self.__path(member)
+        return None
 
     def __path(self, members: Union[str, list]) -> Union[str, tuple]:
         """
@@ -125,12 +162,20 @@ class XsaParser(Xsa):
     @property
     def bitstreamPaths(self) -> tuple:
         """
-        return a tuple of paths to extracted bitstreams defined in sysdef.xml
-
+        Return a tuple of paths to extracted Zynq/ZU+ bitstreams (sysdef File Type=BIT).
         """
         if self.is_pre_synth():
             return None
         return self._Xsa__path([e.attrib["Name"] for e in self.__bitstreamElements()])
+
+    @property
+    def deviceImagePaths(self) -> tuple:
+        """
+        Return a tuple of paths to extracted Versal PDIs (sysdef File Type=PDI).
+        """
+        if self.is_pre_synth():
+            return None
+        return self._Xsa__path([e.attrib["Name"] for e in self.__deviceImageElements()])
 
     @property
     def defaultHwhPaths(self) -> tuple:
@@ -201,17 +246,36 @@ class XsaParser(Xsa):
         ]
         return self._Xsa__path(bdc_hwhs)
 
+    def _primaryProgrammableImagePath(self) -> Optional[str]:
+        """
+        Return the primary programmable device image path (BIT or PDI), or None.
+        """
+        if self.is_pre_synth():
+            return None
+        if self.bitstreamPaths:
+            return self.bitstreamPaths[0]
+        if self.deviceImagePaths:
+            return self.deviceImagePaths[0]
+        return None
+
     def createNameMatchingDefaultHwh(self) -> None:
         """
-        A temporary fix to rename the default bd to match the primary bitstream.
-        TODO: make it so that the whole XsaParser object is passed down into the
+        Copy the default BD HWH so its basename matches the primary programmable
+        device image (bitstream or PDI).
 
-        Assumes that we have only one bitfile, need to test this with PR projects.
+        PYNQ expects ``foo.hwh`` alongside ``foo.bit`` or ``foo.pdi`` when loading
+        an overlay.
+
+        Assumes a single primary image; uses the first BIT or PDI in sysdef order.
         """
         if self.is_pre_synth():
             return None
 
-        expected_hwh = os.path.splitext(self.bitstreamPaths[0])[0] + ".hwh"
+        primary = self._primaryProgrammableImagePath()
+        if primary is None:
+            return None
+
+        expected_hwh = os.path.splitext(primary)[0] + ".hwh"
         if expected_hwh not in self.defaultHwhPaths:
             shutil.copyfile(self.defaultHwhPaths[0], expected_hwh)
 
@@ -278,3 +342,14 @@ class XsaParser(Xsa):
         if self.is_pre_synth():
             return None
         return self._Xsa__sysdef.findall("File[@Type='BIT']")
+
+    def __deviceImageElements(self) -> list:
+        """
+        return a list of elements in sysdef representing Versal PDI device images
+
+        sysdef tag=File attributes Type=PDI
+        """
+        if self.is_pre_synth():
+            return None
+        return (self._Xsa__sysdef.findall("File[@Type='PL_PDI']")
+                or self._Xsa__sysdef.findall("File[@Type='PDI']"))
