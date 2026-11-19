@@ -304,7 +304,8 @@ def get_metadata_core_from_component_xml(ipname, iptypes, xml) -> pynqmetadata.C
                         name=field.find("spirit:name", ns).text,
                         LSB=int(field.find("spirit:bitOffset", ns).text),
                         MSB=int(field.find("spirit:bitOffset", ns).text)
-                        + int(field.find("spirit:bitWidth", ns).text),
+                        + int(field.find("spirit:bitWidth", ns).text)
+                        - 1,
                         description=field.find("spirit:description", ns).text,
                         access=field.find("spirit:access", ns).text,
                     )
@@ -442,7 +443,8 @@ def get_metadata_core_from_xci(ipname, xci) -> pynqmetadata.Core:
                             name=field,
                             LSB=int(fields[field]["bit_offset"]),
                             MSB=int(fields[field]["bit_offset"])
-                            + int(fields[field]["bit_width"]),
+                            + int(fields[field]["bit_width"])
+                            - 1,
                             description=fields[field]["description"],
                             access=fields[field]["access"],
                         )
